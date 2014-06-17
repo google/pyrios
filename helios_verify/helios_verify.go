@@ -19,8 +19,8 @@ import (
 	"flag"
 	"io/ioutil"
 
-	"code.google.com/p/pyrios"
 	"github.com/golang/glog"
+	"github.com/google/pyrios"
 )
 
 func main() {
@@ -29,13 +29,14 @@ func main() {
 	var bundleFile = flag.String("bundle", "", "The file to write the bundle into")
 	var download = flag.Bool("download", true, "Whether or not to download the bundle")
 	var verify = flag.Bool("verify", false, "Whether or not to verify the downloaded bundle")
+	var write = flag.Bool("write", true, "Whether or not to write the downloaded bundle to a file")
 	flag.Parse()
 
 	if len(*electionUuid) == 0 {
 		glog.Fatal("Must provide an election uuid")
 	}
 
-	if len(*bundleFile) == 0 {
+	if (!*download || *write) && len(*bundleFile) == 0 {
 		glog.Fatal("Must provide a bundle file name")
 	}
 
@@ -47,14 +48,16 @@ func main() {
 			panic(err)
 		}
 
-		serialized, err := json.Marshal(b)
-		if err != nil {
-			panic(err)
-		}
+		if *write {
+			serialized, err := json.Marshal(b)
+			if err != nil {
+				panic(err)
+			}
 
-		err = ioutil.WriteFile(*bundleFile, serialized, 0644)
-		if err != nil {
-			panic(err)
+			err = ioutil.WriteFile(*bundleFile, serialized, 0644)
+			if err != nil {
+				panic(err)
+			}
 		}
 	} else {
 		serialized, err := ioutil.ReadFile(*bundleFile)

@@ -18,8 +18,8 @@ import (
 	"flag"
 	"io/ioutil"
 
-	"code.google.com/p/pyrios"
 	"github.com/golang/glog"
+	"github.com/google/pyrios"
 )
 
 func main() {
@@ -28,14 +28,15 @@ func main() {
 	var electionFile = flag.String("election", "", "The file to write the election into or to read it from")
 	var ballotFile = flag.String("ballot", "", "The file containing the JSON for a ballot audit")
 	var fingerprint = flag.String("fingerprint", "", "The ballot tracking number for this ballot")
-	var download = flag.Bool("download", false, "Whether or not to download the bundle")
+	var download = flag.Bool("download", false, "Whether or not to download the election")
+	var write = flag.Bool("write", true, "Whether or not to write the downloaded election to disk")
 	flag.Parse()
 
 	if *download && len(*electionUuid) == 0 {
 		glog.Fatal("Must provide a UUID for downloading election information")
 	}
 
-	if len(*electionFile) == 0 {
+	if (!*download || *write) && len(*electionFile) == 0 {
 		glog.Fatal("Must provide a election file name")
 	}
 
@@ -53,9 +54,11 @@ func main() {
 
 		e.Init(electionJSON)
 
-		err = ioutil.WriteFile(*electionFile, electionJSON, 0644)
-		if err != nil {
-			panic(err)
+		if *write {
+			err = ioutil.WriteFile(*electionFile, electionJSON, 0644)
+			if err != nil {
+				panic(err)
+			}
 		}
 	} else {
 		electionJSON, err := ioutil.ReadFile(*electionFile)
