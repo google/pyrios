@@ -1182,12 +1182,3 @@ func TestSerializedVerification(t *testing.T) {
 	f := "./testdata/test.json"
 	serializedVerificationHelper(f, t)
 }
-
-func TestLongSerializedVerification(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping verification of large election, since testing is short")
-	}
-
-	f := "./testdata/iacr2013.json"
-	serializedVerificationHelper(f, t)
-}
