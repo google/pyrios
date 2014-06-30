@@ -31,25 +31,26 @@ type ElectionBundle struct {
 	ResultsData  []byte   `json:"results"`
 	TrusteesData []byte   `json:"trustees"`
 
-	Election Election     `json:"-"`
-	Voters   []Voter      `json:"-"`
-	Votes    []CastBallot `json:"-"`
-	Results  Result       `json:"-"`
-	Trustees []Trustee    `json:"-"`
+	Election *Election     `json:"-"`
+	Voters   []*Voter      `json:"-"`
+	Votes    []*CastBallot `json:"-"`
+	Results  Result        `json:"-"`
+	Trustees []*Trustee    `json:"-"`
 }
 
 // Instantiate deserializes the serialized election data structures (the *Data
 // values) stored in an ElectionBundle.
 func (b *ElectionBundle) Instantiate() error {
 	// This prepares the election hash that is used in cast-ballot verification.
-	b.Election.Init(b.ElectionData)
 	err := UnmarshalJSON(b.ElectionData, &b.Election)
 	if err != nil {
 		return err
 	}
 
+	b.Election.Init(b.ElectionData)
+
 	for i, jsonData := range b.VotersData {
-		var tempVoters []Voter
+		var tempVoters []*Voter
 		err = UnmarshalJSON(jsonData, &tempVoters)
 		if err != nil {
 			glog.Errorf("Couldn't unmarshal the voter information for set %d\n", i)
@@ -62,15 +63,15 @@ func (b *ElectionBundle) Instantiate() error {
 	glog.Infof("There are %d voters in this election\n", len(b.Voters))
 
 	for i, jsonData := range b.VotesData {
-		vote := new(CastBallot)
-		err = UnmarshalJSON(jsonData, vote)
+		var vote *CastBallot
+		err = UnmarshalJSON(jsonData, &vote)
 		if err != nil {
 			glog.Error("Couldn't unmarshal voter ", i)
 			return err
 		}
 
 		vote.JSON = jsonData
-		b.Votes = append(b.Votes, *vote)
+		b.Votes = append(b.Votes, vote)
 	}
 
 	glog.Infof("Collected %d cast ballots for the retally\n", len(b.Votes))
@@ -111,7 +112,7 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 	// specifies the last received voter.
 	after := ""
 	for {
-		var tempVoters []Voter
+		var tempVoters []*Voter
 		var votersJSON []byte
 		// Helios accepts "after=" as specifying the beginning of the
 		// list.
@@ -138,8 +139,8 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 
 	for _, v := range b.Voters {
 		glog.Info("Getting voter ", v.Uuid)
-		vote := new(CastBallot)
-		jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", vote)
+		var vote *CastBallot
+		jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", &vote)
 		if err != nil {
 			glog.Errorf("Couldn't get the last ballot cast by %s\n", v.Uuid)
 		}
@@ -150,7 +151,7 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 		}
 
 		vote.JSON = jsonData
-		b.Votes = append(b.Votes, *vote)
+		b.Votes = append(b.Votes, vote)
 		b.VotesData = append(b.VotesData, jsonData)
 	}
 

@@ -80,18 +80,18 @@ type Question struct {
 // a value m is performed as (g^r, g^m * y^r) mod p.
 type Key struct {
 	// Generator is the generator element g used in ElGamal encryptions.
-	Generator big.Int `json:"g"`
+	Generator *big.Int `json:"g"`
 
 	// Prime is the prime p for the group used in encryption.
-	Prime big.Int `json:"p"`
+	Prime *big.Int `json:"p"`
 
 	// ExponentPrime is another prime that specifies the group of exponent
 	// values in the exponent of Generator. It is used in challenge
 	// generation and verification.
-	ExponentPrime big.Int `json:"q"`
+	ExponentPrime *big.Int `json:"q"`
 
 	// PublicValue is the public-key value y used to encrypt.
-	PublicValue big.Int `json:"y"`
+	PublicValue *big.Int `json:"y"`
 }
 
 // An Election contains all the information about a Helios election.
@@ -127,10 +127,10 @@ type Election struct {
 	// PublicKey is the ElGamal public key associated with the election.
 	// This is the key used to encrypt all ballots and to create and verify
 	// proofs.
-	PublicKey Key `json:"public_key"`
+	PublicKey *Key `json:"public_key"`
 
 	// Questions is the list of questions to be voted on in this election.
-	Questions []Question `json:"questions"`
+	Questions []*Question `json:"questions"`
 
 	// ShortName provides a short plaintext name for this election.
 	ShortName string `json:"short_name"`
@@ -166,18 +166,17 @@ func (election *Election) Init(json []byte) {
 // AccumulateTallies combines the ballots homomorphically for each question and answer
 // to get an encrypted tally for each. It also compute the ballot tracking numbers for
 // each of the votes.
-func (election *Election) AccumulateTallies(votes []CastBallot) ([][]Ciphertext, []string) {
+func (election *Election) AccumulateTallies(votes []*CastBallot) ([][]*Ciphertext, []string) {
 	// Initialize the tally structures for homomorphic accumulation.
 
-	tallies := make([][]Ciphertext, len(election.Questions))
+	tallies := make([][]*Ciphertext, len(election.Questions))
 	fingerprints := make([]string, len(votes))
 	for i := range tallies {
-		tallies[i] = make([]Ciphertext, len(election.Questions[i].Answers))
+		tallies[i] = make([]*Ciphertext, len(election.Questions[i].Answers))
 		for j := range tallies[i] {
 			// Each tally must start at 1 for the multiplicative
 			// homomorphism to work.
-			tallies[i][j].Alpha.SetInt64(1)
-			tallies[i][j].Beta.SetInt64(1)
+			tallies[i][j] = &Ciphertext{big.NewInt(1), big.NewInt(1)}
 		}
 	}
 
@@ -197,11 +196,10 @@ func (election *Election) AccumulateTallies(votes []CastBallot) ([][]Ciphertext,
 		fingerprint := encodedHash[:len(encodedHash)-1]
 		fingerprints = append(fingerprints, fingerprint)
 
-		for j := range election.Questions {
-			q := &election.Questions[j]
+		for j, q := range election.Questions {
 			for k := range q.Answers {
-				// tally_i_j = (tally_i_j * ballot_i_j) mod p
-				tallies[j][k].MulCiphertexts(&votes[i].Vote.Answers[j].Choices[k], &election.PublicKey.Prime)
+				// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
+				tallies[j][k].MulCiphertexts(votes[i].Vote.Answers[j].Choices[k], election.PublicKey.Prime)
 			}
 		}
 	}
@@ -225,7 +223,7 @@ func (election *Election) AccumulateTallies(votes []CastBallot) ([][]Ciphertext,
 // tally computation. It then checks the purported tally value in the Result by
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
-func (election *Election) Retally(votes []CastBallot, result Result, trustees []Trustee) bool {
+func (election *Election) Retally(votes []*CastBallot, result Result, trustees []*Trustee) bool {
 	tallies, voteFingerprints := election.AccumulateTallies(votes)
 	if len(voteFingerprints) == 0 {
 		glog.Error("Some votes didn't pass verification")
@@ -241,8 +239,7 @@ func (election *Election) Retally(votes []CastBallot, result Result, trustees []
 	}
 
 	glog.Info("Checking the final tally")
-	for i := range election.Questions {
-		q := &election.Questions[i]
+	for i, q := range election.Questions {
 		if len(result[i]) != len(q.Answers) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
@@ -250,34 +247,33 @@ func (election *Election) Retally(votes []CastBallot, result Result, trustees []
 
 		for j := range q.Answers {
 			decFactorCombination := big.NewInt(1)
-			for k := range trustees {
-				t := &trustees[k]
+			for _, t := range trustees {
 				if !t.DecryptionProofs[i][j].VerifyPartialDecryption(
-					&tallies[i][j],
-					&t.DecryptionFactors[i][j],
-					&t.PublicKey) {
+					tallies[i][j],
+					t.DecryptionFactors[i][j],
+					t.PublicKey) {
 					glog.Errorf("The partial decryption proof for %d, %d failed\n", i, j)
 					return false
 				}
 
 				// Combine this partial decryption using the
 				// homomorphism.
-				decFactorCombination.Mul(decFactorCombination, &t.DecryptionFactors[i][j])
+				decFactorCombination.Mul(decFactorCombination, t.DecryptionFactors[i][j])
 			}
 
 			// Contrary to how it's written in the published spec,
 			// the result must be represented as g^m rather than m,
 			// since everything is done in exponential ElGamal.
 			bigResult := big.NewInt(result[i][j])
-			bigResult.Exp(&election.PublicKey.Generator, bigResult, &election.PublicKey.Prime)
+			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
 			lhs := big.NewInt(1)
 			// (decFactorCombination * bigResult) mod p
 			lhs.Mul(decFactorCombination, bigResult)
-			lhs.Mod(lhs, &election.PublicKey.Prime)
+			lhs.Mod(lhs, election.PublicKey.Prime)
 
 			rhs := big.NewInt(1)
 			// tally_i_j.Beta mod p
-			rhs.Mod(&tallies[i][j].Beta, &election.PublicKey.Prime)
+			rhs.Mod(tallies[i][j].Beta, election.PublicKey.Prime)
 
 			// These should match if the combination of the partial
 			// decryptions was correct.
@@ -295,10 +291,10 @@ func (election *Election) Retally(votes []CastBallot, result Result, trustees []
 // random value, m is a message, and y is Key.PublicValue.
 type Ciphertext struct {
 	// Alpha = g^r
-	Alpha big.Int `json:"alpha"`
+	Alpha *big.Int `json:"alpha"`
 
 	// Beta = g^m * y^r
-	Beta big.Int `json:"beta"`
+	Beta *big.Int `json:"beta"`
 }
 
 // MulCiphertexts multiplies an ElGamal Ciphertext value element-wise into an
@@ -306,10 +302,10 @@ type Ciphertext struct {
 // other Ciphertext to the prod Ciphertext. The prime specifies the group in
 // which these multiplication operations are to be performed.
 func (prod *Ciphertext) MulCiphertexts(other *Ciphertext, prime *big.Int) *Ciphertext {
-	prod.Alpha.Mul(&prod.Alpha, &other.Alpha)
-	prod.Alpha.Mod(&prod.Alpha, prime)
-	prod.Beta.Mul(&prod.Beta, &other.Beta)
-	prod.Beta.Mod(&prod.Beta, prime)
+	prod.Alpha.Mul(prod.Alpha, other.Alpha)
+	prod.Alpha.Mod(prod.Alpha, prime)
+	prod.Beta.Mul(prod.Beta, other.Beta)
+	prod.Beta.Mod(prod.Beta, prime)
 	return prod
 }
 
@@ -343,7 +339,7 @@ type Voter struct {
 type EncryptedAnswer struct {
 	// Choices is a list of votes for each choice in a Question. Each choice
 	// is encrypted with the Election.PublicKey.
-	Choices []Ciphertext `json:"choices"`
+	Choices []*Ciphertext `json:"choices"`
 
 	// IndividualProofs gives a proof that each corresponding entry in
 	// Choices is well formed: this means that it is either 0 or 1. So, each
@@ -368,7 +364,7 @@ type EncryptedAnswer struct {
 	// used to encrypt Answer in EncryptedAnswer. This is not serialized or
 	// deserialized if not present. This must only be present in a spoiled
 	// ballot because SECRECY.
-	Randomness []big.Int `json:"randomness,omitempty"`
+	Randomness []*big.Int `json:"randomness,omitempty"`
 }
 
 // VerifyAnswer checks the DisjunctiveZKProof values for a given
@@ -379,17 +375,15 @@ type EncryptedAnswer struct {
 // If there is no OverallProof, then it makes sure that this is an approval
 // question so that this last check doesn't matter.
 func (answer *EncryptedAnswer) VerifyAnswer(min int, max int, choiceType string, publicKey *Key) bool {
-	var prod Ciphertext
-	prod.Alpha.SetInt64(1)
-	prod.Beta.SetInt64(1)
+	prod := &Ciphertext{big.NewInt(1), big.NewInt(1)}
 	for i := range answer.Choices {
-		proof := &answer.IndividualProofs[i]
+		proof := answer.IndividualProofs[i]
 		// Each answer can only be 0 or 1.
-		if !proof.Verify(0, 1, &answer.Choices[i], publicKey) {
+		if !proof.Verify(0, 1, answer.Choices[i], publicKey) {
 			glog.Errorf("The proof for choice %d did not pass verification\n", i)
 			return false
 		}
-		prod.MulCiphertexts(&answer.Choices[i], &publicKey.Prime)
+		prod.MulCiphertexts(answer.Choices[i], publicKey.Prime)
 	}
 
 	if len(answer.OverallProof) == 0 {
@@ -397,7 +391,7 @@ func (answer *EncryptedAnswer) VerifyAnswer(min int, max int, choiceType string,
 			glog.Error("Couldn't check a null overall proof")
 			return false
 		}
-	} else if !answer.OverallProof.Verify(min, max, &prod, publicKey) {
+	} else if !answer.OverallProof.Verify(min, max, prod, publicKey) {
 		glog.Error("The overall proof did not pass verification")
 		return false
 	}
@@ -409,7 +403,7 @@ func (answer *EncryptedAnswer) VerifyAnswer(min int, max int, choiceType string,
 type Ballot struct {
 	// Answers is a list of answers to the Election specified by
 	// ElectionUuid and ElectionHash.
-	Answers []EncryptedAnswer `json:"answers"`
+	Answers []*EncryptedAnswer `json:"answers"`
 
 	// ElectionHash is the SHA-256 hash of the Election specified by
 	// ElectionUuid.
@@ -430,8 +424,8 @@ func (vote *Ballot) Verify(election *Election) bool {
 	}
 
 	for i := range vote.Answers {
-		q := &election.Questions[i]
-		if !vote.Answers[i].VerifyAnswer(q.Min, q.Max, q.ChoiceType, &election.PublicKey) {
+		q := election.Questions[i]
+		if !vote.Answers[i].VerifyAnswer(q.Min, q.Max, q.ChoiceType, election.PublicKey) {
 			glog.Errorf("Answer %d did not pass verification\n", i)
 			return false
 		}
@@ -452,7 +446,7 @@ type CastBallot struct {
 	CastAt string `json:"cast_at"`
 
 	// Vote is the cast Ballot itself.
-	Vote Ballot `json:"vote"`
+	Vote *Ballot `json:"vote"`
 
 	// VoteHash is the SHA-256 hash of the JSON corresponding to Vote.
 	VoteHash string `json:"vote_hash"`
@@ -474,18 +468,18 @@ type Result [][]int64
 type Trustee struct {
 	// DecryptionFactors are the partial decryptions of each of the
 	// homomorphic tally results.
-	DecryptionFactors [][]big.Int `json:"decryption_factors"`
+	DecryptionFactors [][]*big.Int `json:"decryption_factors"`
 
 	// DecryptionProofs are the proofs of correct partial decryption for
 	// each of the DecryptionFactors.
-	DecryptionProofs [][]ZKProof `json:"decryption_proofs"`
+	DecryptionProofs [][]*ZKProof `json:"decryption_proofs"`
 
 	// PoK is a proof of knowledge of the private key share held by this
 	// Trustee and used to create the DecryptionFactors.
-	PoK SchnorrProof `json:"pok"`
+	PoK *SchnorrProof `json:"pok"`
 
 	// PublicKey is the ElGamal public key of this Trustee.
-	PublicKey Key `json:"public_key"`
+	PublicKey *Key `json:"public_key"`
 
 	// PublicKeyHash is the SHA-256 hash of the JSON representation of
 	// PublicKey.
@@ -516,7 +510,7 @@ type LabeledResult []LabeledQuestion
 func (election *Election) LabelResults(results [][]int64) LabeledResult {
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
-		q := &election.Questions[i]
+		q := election.Questions[i]
 		labeledRes[i].Question = q.Question
 		labeledRes[i].Answers = make([]LabeledEntry, len(q.Answers))
 		for j := range q.Answers {
@@ -556,8 +550,7 @@ func (vote *Ballot) Audit(fingerprint string, ballotJSONData []byte, election *E
 	glog.Info("The ballot passed zero-knowledge-proof verification")
 
 	// Then we need to check the supplied fingerprint and all the answers/randomness.
-	for i := range vote.Answers {
-		a := &vote.Answers[i]
+	for i, a := range vote.Answers {
 		if len(a.Choices) != len(a.Randomness) {
 			glog.Errorf("Answer %d does not have the right amount of randomness\n", i)
 			return false
@@ -565,34 +558,32 @@ func (vote *Ballot) Audit(fingerprint string, ballotJSONData []byte, election *E
 
 		// This code checks the encryptions based on the definition of exponential ElGamal:
 		// Enc(y, m ; r) = (g^r, g^y * g^m)
-		for j := range a.Choices {
-			c := &a.Choices[j]
+		for j, c := range a.Choices {
 			r := a.Randomness[j]
 
 			// If this is a real answer (in some votes, there can be more than one), then use g^1, otherwise use g^0.
-			var plaintext big.Int
-			plaintext.SetInt64(1)
+			plaintext := big.NewInt(1)
 			for _, val := range a.Answer {
 				if int64(j) == val {
-					plaintext.Mul(&plaintext, &election.PublicKey.Generator)
+					plaintext.Mul(plaintext, election.PublicKey.Generator)
 					break
 				}
 			}
 
 			lhs := new(big.Int)
 			// g^randomness mod p == ciphertext.Alpha
-			lhs.Exp(&election.PublicKey.Generator, &r, &election.PublicKey.Prime)
-			if lhs.Cmp(&c.Alpha) != 0 {
+			lhs.Exp(election.PublicKey.Generator, r, election.PublicKey.Prime)
+			if lhs.Cmp(c.Alpha) != 0 {
 				glog.Errorf("The first component of choice %d in answer %d was not correctly encrypted\n", j, i)
 				return false
 			}
 
 			rhs := new(big.Int)
 			// y^randomness * plaintext mod p == ciphertext.Beta
-			rhs.Exp(&election.PublicKey.PublicValue, &r, &election.PublicKey.Prime)
-			rhs.Mul(rhs, &plaintext)
-			rhs.Mod(rhs, &election.PublicKey.Prime)
-			if rhs.Cmp(&c.Beta) != 0 {
+			rhs.Exp(election.PublicKey.PublicValue, r, election.PublicKey.Prime)
+			rhs.Mul(rhs, plaintext)
+			rhs.Mod(rhs, election.PublicKey.Prime)
+			if rhs.Cmp(c.Beta) != 0 {
 				glog.Errorf("The second component of choice %d in answer %d was not correctly encrypted\n", j, i)
 				return false
 			}

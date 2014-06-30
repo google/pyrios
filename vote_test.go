@@ -31,12 +31,12 @@ import (
 // selected or not. It also generates a DisjunctiveZKProof to show that
 // the value is either selected or not. It returns the randomness it
 // generated; this is useful for computing the OverallProof for a Question.
-func (c *Ciphertext) Encrypt(selected bool, proof *DisjunctiveZKProof, pk *Key) (*big.Int, error) {
+func (c *Ciphertext) Encrypt(selected bool, pk *Key) (*big.Int, DisjunctiveZKProof, error) {
 	// If this value is selected, then use g^1; otherwise, use g^0.
 	var plaintext *big.Int
 	var realExp, fakeExp int64
 	if selected {
-		plaintext = &pk.Generator
+		plaintext = pk.Generator
 		realExp = 1
 		fakeExp = 0
 	} else {
@@ -47,30 +47,31 @@ func (c *Ciphertext) Encrypt(selected bool, proof *DisjunctiveZKProof, pk *Key) 
 
 	var randomness *big.Int
 	var err error
-	if randomness, err = rand.Int(rand.Reader, &pk.ExponentPrime); err != nil {
+	if randomness, err = rand.Int(rand.Reader, pk.ExponentPrime); err != nil {
 		glog.Error("Couldn't get randomness for an encryption")
-		return nil, err
+		return nil, nil, err
 	}
 
-	c.Alpha.Exp(&pk.Generator, randomness, &pk.Prime)
-	c.Beta.Exp(&pk.PublicValue, randomness, &pk.Prime)
-	c.Beta.Mul(&c.Beta, plaintext)
-	c.Beta.Mod(&c.Beta, &pk.Prime)
+	c.Alpha.Exp(pk.Generator, randomness, pk.Prime)
+	c.Beta.Exp(pk.PublicValue, randomness, pk.Prime)
+	c.Beta.Mul(c.Beta, plaintext)
+	c.Beta.Mod(c.Beta, pk.Prime)
 
 	// Real proof of selected and a simulated proof of !selected
-	*proof = make([]ZKProof, 2)
+	var proof DisjunctiveZKProof
+	proof = make([]*ZKProof, 2)
 
-	if err = (*proof).CreateFakeProof(fakeExp, fakeExp, c, pk); err != nil {
+	if err = proof.CreateFakeProof(fakeExp, fakeExp, c, pk); err != nil {
 		glog.Error("Couldn't create a simulated proof")
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err = (*proof).CreateRealProof(realExp, c, randomness, pk); err != nil {
+	if err = proof.CreateRealProof(realExp, c, randomness, pk); err != nil {
 		glog.Error("Couldn't create a real proof")
-		return nil, err
+		return nil, nil, err
 	}
 
-	return randomness, nil
+	return randomness, proof, nil
 }
 
 // ComputeMax returns the max value for the question, which is the
@@ -90,16 +91,16 @@ func (vote *Ballot) Create(election *Election, answers [][]int64) error {
 		return errors.New("wrong number of answers")
 	}
 
-	pk := &election.PublicKey
+	pk := election.PublicKey
 
 	vote.ElectionHash = election.ElectionHash
 	vote.ElectionUuid = election.Uuid
 
-	vote.Answers = make([]EncryptedAnswer, len(election.Questions))
+	vote.Answers = make([]*EncryptedAnswer, len(election.Questions))
 
-	for i := range election.Questions {
-		q := &election.Questions[i]
+	for i, q := range election.Questions {
 		a := answers[i]
+		vote.Answers[i] = new(EncryptedAnswer)
 		results := make([]bool, len(q.Answers))
 		sum := int64(len(a))
 
@@ -110,10 +111,10 @@ func (vote *Ballot) Create(election *Election, answers [][]int64) error {
 			return errors.New("invalid answers: sum must lie between min and max")
 		}
 
-		encAnswer := &vote.Answers[i]
-		encAnswer.Choices = make([]Ciphertext, len(results))
+		encAnswer := vote.Answers[i]
+		encAnswer.Choices = make([]*Ciphertext, len(results))
 		encAnswer.IndividualProofs = make([]DisjunctiveZKProof, len(results))
-		encAnswer.Randomness = make([]big.Int, len(results))
+		encAnswer.Randomness = make([]*big.Int, len(results))
 
 		encAnswer.Answer = make([]int64, len(a))
 		copy(encAnswer.Answer, a)
@@ -124,27 +125,25 @@ func (vote *Ballot) Create(election *Election, answers [][]int64) error {
 		}
 
 		// Encrypt and create proofs for the answers, then create an overall proof if required
-		tally := &Ciphertext{*big.NewInt(1), *big.NewInt(1)}
+		tally := &Ciphertext{big.NewInt(1), big.NewInt(1)}
 		randTally := big.NewInt(0)
 		for j := range q.Answers {
-			var r *big.Int
 			var err error
-			if r, err = encAnswer.Choices[j].Encrypt(results[j], &encAnswer.IndividualProofs[j], pk); err != nil {
+			encAnswer.Choices[j] = &Ciphertext{new(big.Int), new(big.Int)}
+			if encAnswer.Randomness[j], encAnswer.IndividualProofs[j], err = encAnswer.Choices[j].Encrypt(results[j], pk); err != nil {
 				glog.Errorf("Couldn't encrypt choice %d for question %d\n", j, i)
 				return err
 			}
 
-			encAnswer.Randomness[j] = *r
-
-			tally.MulCiphertexts(&encAnswer.Choices[j], &pk.Prime)
-			randTally.Add(randTally, r)
-			randTally.Mod(randTally, &pk.ExponentPrime)
+			tally.MulCiphertexts(encAnswer.Choices[j], pk.Prime)
+			randTally.Add(randTally, encAnswer.Randomness[j])
+			randTally.Mod(randTally, pk.ExponentPrime)
 		}
 
 		if q.Max == 0 {
 			encAnswer.OverallProof = nil
 		} else {
-			encAnswer.OverallProof = make([]ZKProof, q.Max-q.Min+1)
+			encAnswer.OverallProof = make([]*ZKProof, q.Max-q.Min+1)
 			for j := q.Min; j <= q.Max; j++ {
 				if int64(j) != sum {
 					// Create a simulated proof for the case where the
@@ -170,6 +169,7 @@ func (vote *Ballot) Create(election *Election, answers [][]int64) error {
 // Create instantiates a CastBallot for a given set of answers for a Voter.
 func (cb *CastBallot) Create(election *Election, answers [][]int64, v *Voter, auditable bool) error {
 	// First, create the encrypted vote.
+	cb.Vote = new(Ballot)
 	if err := cb.Vote.Create(election, answers); err != nil {
 		glog.Error("Couldn't encrypt a ballot: ", err)
 		return err
@@ -184,7 +184,7 @@ func (cb *CastBallot) Create(election *Election, answers [][]int64, v *Voter, au
 	}
 
 	cb.CastAt = time.Now().String()
-	serializedVote, err := MarshalJSON(&cb.Vote)
+	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
 		glog.Error("Couldn't marshal the JSON for an encrypted ballot")
 		return err
@@ -276,9 +276,9 @@ func (q *Question) Create(answers []string, max int, min int, question string, r
 
 // Create uses a given set of parameters to generate a public key.
 func (k *Key) CreateFromParams(g *big.Int, p *big.Int, q *big.Int) (*big.Int, error) {
-	k.Generator = *g
-	k.Prime = *p
-	k.ExponentPrime = *q
+	k.Generator = g
+	k.Prime = p
+	k.ExponentPrime = q
 
 	secret, err := rand.Int(rand.Reader, q)
 	if err != nil {
@@ -286,7 +286,7 @@ func (k *Key) CreateFromParams(g *big.Int, p *big.Int, q *big.Int) (*big.Int, er
 		return nil, err
 	}
 
-	k.PublicValue.Exp(g, secret, p)
+	k.PublicValue = new(big.Int).Exp(g, secret, p)
 	return secret, nil
 
 }
@@ -297,8 +297,8 @@ func (k *Key) Create() (*big.Int, error) {
 	// Use the DSA crypto code to generate a key pair. For testing
 	// purposes, we'll use (2048,224) instead of (2048,160) as used by the
 	// current Helios implementation
-	var params dsa.Parameters
-	if err := dsa.GenerateParameters(&params, rand.Reader, dsa.L2048N224); err != nil {
+	params := new(dsa.Parameters)
+	if err := dsa.GenerateParameters(params, rand.Reader, dsa.L2048N224); err != nil {
 		glog.Error("Couldn't generate DSA parameters for the ElGamal group")
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func (k *Key) Create() (*big.Int, error) {
 
 // Create instantiates a new election with the given parameters.
 func (e *Election) Create(url string, desc string, frozenAt string, name string,
-	openreg bool, questions []Question, shortName string,
+	openreg bool, questions []*Question, shortName string,
 	useVoterAliases bool, votersHash string, votingEnd string,
 	votingStart string, k *Key) (*big.Int, error) {
 	e.CastURL = url
@@ -327,6 +327,7 @@ func (e *Election) Create(url string, desc string, frozenAt string, name string,
 	}
 
 	var secret *big.Int
+	e.PublicKey = new(Key)
 	if k == nil {
 		if secret, err = e.PublicKey.Create(); err != nil {
 			glog.Error("Couldn't generate a new key for the election")
@@ -334,7 +335,7 @@ func (e *Election) Create(url string, desc string, frozenAt string, name string,
 		}
 	} else {
 		// Take the public params from k to generate the key.
-		if secret, err = e.PublicKey.CreateFromParams(&k.Generator, &k.Prime, &k.ExponentPrime); err != nil {
+		if secret, err = e.PublicKey.CreateFromParams(k.Generator, k.Prime, k.ExponentPrime); err != nil {
 			glog.Error("Couldn't generate a new key for the election")
 			return nil, err
 		}
@@ -376,7 +377,7 @@ func GenUUID() (string, error) {
 // Tally computes the tally of an election and returns the result.
 // In the process, it generates partial decryption proofs for each of
 // the partial decryptions computed by the trustee.
-func (e *Election) Tally(votes []CastBallot, trustees []Trustee, trusteeSecrets []big.Int) Result {
+func (e *Election) Tally(votes []*CastBallot, trustees []*Trustee, trusteeSecrets []*big.Int) Result {
 	tallies, voteFingerprints := e.AccumulateTallies(votes)
 	// TODO(tmroeder): maybe we should just skip votes that don't pass verification?
 	// What does the spec say?
@@ -385,19 +386,19 @@ func (e *Election) Tally(votes []CastBallot, trustees []Trustee, trusteeSecrets 
 		return nil
 	}
 
-	for k := range trustees {
-		t := &trustees[k]
-		t.DecryptionFactors = make([][]big.Int, len(e.Questions))
-		t.DecryptionProofs = make([][]ZKProof, len(e.Questions))
-		for i := range e.Questions {
-			q := &e.Questions[i]
-			t.DecryptionFactors[i] = make([]big.Int, len(q.Answers))
-			t.DecryptionProofs[i] = make([]ZKProof, len(q.Answers))
+	for k, t := range trustees {
+		t.DecryptionFactors = make([][]*big.Int, len(e.Questions))
+		t.DecryptionProofs = make([][]*ZKProof, len(e.Questions))
+		for i, q := range e.Questions {
+			t.DecryptionFactors[i] = make([]*big.Int, len(q.Answers))
+			t.DecryptionProofs[i] = make([]*ZKProof, len(q.Answers))
 			for j := range q.Answers {
-				t.DecryptionFactors[i][j].Exp(&tallies[i][j].Alpha,
-					&trusteeSecrets[k], &t.PublicKey.Prime)
+				t.DecryptionFactors[i][j] = new(big.Int)
+				t.DecryptionProofs[i][j] = new(ZKProof)
+				t.DecryptionFactors[i][j].Exp(tallies[i][j].Alpha,
+					trusteeSecrets[k], t.PublicKey.Prime)
 				if err := t.DecryptionProofs[i][j].CreatePartialDecryptionProof(
-					&tallies[i][j], &t.DecryptionFactors[i][j], &trusteeSecrets[k], &t.PublicKey); err != nil {
+					tallies[i][j], t.DecryptionFactors[i][j], trusteeSecrets[k], t.PublicKey); err != nil {
 					glog.Errorf("Couldn't create a proof for (%d, %d) for trustee %d\n", i, j, k)
 					return nil
 				}
@@ -409,30 +410,28 @@ func (e *Election) Tally(votes []CastBallot, trustees []Trustee, trusteeSecrets 
 	// Then put this in the results.
 	maxValue := len(votes)
 	result := make([][]int64, len(e.Questions))
-	for i := range e.Questions {
-		q := &e.Questions[i]
+	for i, q := range e.Questions {
 		result[i] = make([]int64, len(q.Answers))
 		for j := range q.Answers {
 			alpha := big.NewInt(1)
 			for k := range trustees {
-				alpha.Mul(alpha, &trustees[k].DecryptionFactors[i][j])
-				alpha.Mod(alpha, &trustees[k].PublicKey.Prime)
+				alpha.Mul(alpha, trustees[k].DecryptionFactors[i][j])
+				alpha.Mod(alpha, trustees[k].PublicKey.Prime)
 			}
 
-			var beta big.Int
-			beta.ModInverse(alpha, &e.PublicKey.Prime)
-			beta.Mul(&beta, &tallies[i][j].Beta)
-			beta.Mod(&beta, &e.PublicKey.Prime)
+			beta := new(big.Int).ModInverse(alpha, e.PublicKey.Prime)
+			beta.Mul(beta, tallies[i][j].Beta)
+			beta.Mod(beta, e.PublicKey.Prime)
 
 			// This decrypted value can be anything between g^0 and g^maxValue.
 			// Try all values until we find it.
-			var temp big.Int
-			var val big.Int
+			temp := new(big.Int)
+			val := new(big.Int)
 			var v int
 			for v = 0; v <= maxValue; v++ {
 				val.SetInt64(int64(v))
-				temp.Exp(&e.PublicKey.Generator, &val, &e.PublicKey.Prime)
-				if temp.Cmp(&beta) == 0 {
+				temp.Exp(e.PublicKey.Generator, val, e.PublicKey.Prime)
+				if temp.Cmp(beta) == 0 {
 					result[i][j] = int64(v)
 					break
 				}
