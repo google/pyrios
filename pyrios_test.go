@@ -49,14 +49,14 @@ var quickGenerator = "1488749222496318763428242153718604080130400801774349230448
 var quickPrime = "16328632084933010002384055033805457329601614771185955389739167309086214800406465799038583634953752941675645562182498120750264980492381375579367675648771293800310370964745767014243638518442553823973482995267304044326777047662957480269391322789378384619428596446446984694306187644767462460965622580087564339212631775817895958409016676398975671266179637898557687317076177218843233150695157881061257053019133078545928983562221396313169622475509818442661047018436264806901023966236718367204710755935899013750306107738002364137917426595737403871114187750804346564731250609196846638183903982387884578266136503697493474682071"
 var quickExponentPrime = "61329566248342901292543872769978950870633559608669337131139375508370458778917"
 
-func TestQuestionCreation(t *testing.T) {
+func TestNewQuestion(t *testing.T) {
 	answers := make([]string, 3)
 	answers[0] = "yes"
 	answers[1] = "no"
 	answers[2] = "maybe so"
-	q := new(Question)
-	if err := q.Create(answers, 2, 1, "Which is it?", "absolute", "Test Q"); err != nil {
-		t.Error("Couldn't create a question")
+	_, err := NewQuestion(answers, 2, 1, "Which is it?", "absolute", "Test Q")
+	if err != nil {
+		t.Fatal("Couldn't create a question:", err)
 	}
 
 	return
@@ -81,27 +81,26 @@ func instantiateQuickParams() (*big.Int, *big.Int, *big.Int, error) {
 	return g, p, q, nil
 }
 
-func TestKeyCreation(t *testing.T) {
-	var k Key
+func TestNewKey(t *testing.T) {
 	var secret *big.Int
 	var err error
 	if testing.Short() {
 		g, p, q, err := instantiateQuickParams()
 		if err != nil {
-			t.Error(err)
+			t.Fatal("Couldn't instantiate the quick params:", err)
 		}
 
-		secret, err = k.CreateFromParams(g, p, q)
+		_, secret, err = NewKeyFromParams(g, p, q)
 	} else {
-		secret, err = k.Create()
+		_, secret, err = NewKey()
 	}
 
 	if err != nil {
-		t.Error("Couldn't create a key from a given parameter set")
+		t.Fatal("Couldn't create a key from a given parameter set:", err)
 	}
 
 	if secret == nil || secret.BitLen() == 0 {
-		t.Error("Didn't create a valid secret")
+		t.Fatal("Didn't create a valid secret")
 	}
 	return
 }
@@ -154,15 +153,15 @@ func TestRandomElection(t *testing.T) {
 
 	conf := &quick.Config{testCount, 0, rand.New(rand.NewSource(time.Now().UnixNano())), nil}
 	if err := quick.Check(f, conf); err != nil {
-		t.Error("The election didn't pass verification: ", innerErr)
+		t.Fatal("The election didn't pass verification: ", innerErr)
 	}
 }
 
 func createRandomQuestions(r *rand.Rand, questionCount, answerLimit, maxStrLen int) ([]*Question, error) {
 	// Create the questions and answers.
 	questions := make([]*Question, questionCount)
+	var err error
 	for i := range questions {
-		questions[i] = new(Question)
 		// From 1 to answerLimit answers
 		answerCount := r.Intn(answerLimit) + 1
 		answers := make([]string, answerCount)
@@ -179,7 +178,7 @@ func createRandomQuestions(r *rand.Rand, questionCount, answerLimit, maxStrLen i
 
 		questionLen := r.Intn(maxStrLen) + 1
 		shortLen := r.Intn(maxStrLen) + 1
-		if err := questions[i].Create(answers, max, min, randomString(questionLen, r),
+		if questions[i], err = NewQuestion(answers, max, min, randomString(questionLen, r),
 			"absolute", randomString(shortLen, r)); err != nil {
 			return nil, err
 		}
@@ -192,8 +191,8 @@ func createRandomVoters(r *rand.Rand, voterCount, maxStrLen int) ([]*Voter, erro
 	// Create the voters.
 	voters := make([]*Voter, voterCount)
 	coin := ((r.Intn(2) % 2) == 0)
+	var err error
 	for i := range voters {
-		voters[i] = new(Voter)
 		nameLen := r.Intn(maxStrLen) + 1
 		emailLen := r.Intn(maxStrLen) + 1
 		voterHash := ""
@@ -201,7 +200,7 @@ func createRandomVoters(r *rand.Rand, voterCount, maxStrLen int) ([]*Voter, erro
 			hashLen := r.Intn(maxStrLen) + 1
 			voterHash = randomString(hashLen, r)
 		}
-		if err := voters[i].Create(randomString(nameLen, r), randomString(emailLen, r),
+		if voters[i], err = NewVoter(randomString(nameLen, r), randomString(emailLen, r),
 			coin, voterHash, "email"); err != nil {
 			return nil, err
 		}
@@ -214,7 +213,6 @@ func createRandomVoters(r *rand.Rand, voterCount, maxStrLen int) ([]*Voter, erro
 
 func createRandomElection(r *rand.Rand, maxStrLen int, voters []*Voter, questions []*Question) (*Election, *big.Int, error) {
 	// Create the election.
-	e := new(Election)
 	urlLen := r.Intn(maxStrLen) + 1
 	url := randomString(urlLen, r)
 
@@ -252,13 +250,8 @@ func createRandomElection(r *rand.Rand, maxStrLen int, voters []*Voter, question
 		}
 	}
 
-	secret, err := e.Create(url, electionDesc, frozenAt, electionName, openreg,
+	return NewElection(url, electionDesc, frozenAt, electionName, openreg,
 		questions, shortName, false, votersHash, votingEnds, votingStarts, pk)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return e, secret, nil
 }
 
 func createRandomBallots(r *rand.Rand, voterCount, ballotCount, auditCount int, voters []*Voter, questions []*Question, e *Election) ([]*CastBallot, [][]int64, error) {
@@ -308,8 +301,8 @@ func createRandomBallots(r *rand.Rand, voterCount, ballotCount, auditCount int, 
 			if ballotAuditRequired[k] {
 				// Create a spoiled ballot and audit it before
 				// creating the real ballot.
-				cb := new(CastBallot)
-				if err := cb.Create(e, answers, v, true /* save audit info */); err != nil {
+				cb, err := NewCastBallot(e, answers, v, true /* save audit info */)
+				if err != nil {
 					c <- err
 					return
 				}
@@ -327,8 +320,9 @@ func createRandomBallots(r *rand.Rand, voterCount, ballotCount, auditCount int, 
 				}
 			}
 
-			votes[k] = new(CastBallot)
-			c <- votes[k].Create(e, answers, v, false /* don't save audit info */)
+			var err error
+			votes[k], err = NewCastBallot(e, answers, v, false /* don't save audit info */)
+			c <- err
 			return
 		}(resp)
 	}
@@ -429,13 +423,13 @@ func TestCorruptedDecryptionProofA(t *testing.T) {
 	// question, one trustee.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	corruptInteger(r, b.Trustees[0].DecryptionProofs[0][0].Commitment.A)
 	if b.Verify() {
-		t.Error("A corrupted bundle still passes verification")
+		t.Fatal("A corrupted bundle still passes verification")
 	}
 }
 
@@ -444,13 +438,13 @@ func TestCorruptedDecryptionProofB(t *testing.T) {
 	// question, one trustee.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	corruptInteger(r, b.Trustees[0].DecryptionProofs[0][0].Commitment.B)
 	if b.Verify() {
-		t.Error("A corrupted bundle still passes verification")
+		t.Fatal("A corrupted bundle still passes verification")
 	}
 }
 
@@ -460,7 +454,7 @@ func TestCorruptedDecryptionProofBadHash(t *testing.T) {
 	// to 1 == 1, so it passes verification. But the hash then doesn't work.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	d := b.Trustees[0].DecryptionProofs[0][0]
@@ -469,7 +463,7 @@ func TestCorruptedDecryptionProofBadHash(t *testing.T) {
 	d.Commitment.A.SetInt64(1)
 	d.Commitment.B.SetInt64(1)
 	if b.Verify() {
-		t.Error("A corrupted bundle still passes verification")
+		t.Fatal("A corrupted bundle still passes verification")
 	}
 }
 
@@ -477,25 +471,25 @@ func TestCorruptedRetallyResults(t *testing.T) {
 	// Try with the wrong number of results.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	// Wrong number of questions.
 	fakeResults := [][]int64{{1, 2, 3, 4, 5}, {2, 3, 4, 5, 6}, {3, 4, 5, 6, 7}}
 	if b.Election.Retally(b.Votes, fakeResults, b.Trustees) {
-		t.Error("The wrong results passed a retally")
+		t.Fatal("The wrong results passed a retally")
 	}
 
 	// Wrong number of results.
 	fakeResults = [][]int64{{1, 2, 3, 4, 5}}
 	if b.Election.Retally(b.Votes, fakeResults, b.Trustees) {
-		t.Error("The wrong results passed a retally")
+		t.Fatal("The wrong results passed a retally")
 	}
 
 	// Wrong individual result.
 	b.Results[0][0] = 200
 	if b.Verify() {
-		t.Error("A bundle with an incorrect result passed verification")
+		t.Fatal("A bundle with an incorrect result passed verification")
 	}
 }
 
@@ -503,30 +497,30 @@ func TestCorruptedProofWrongAlpha(t *testing.T) {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	e, votes, err := createSingleBallot(r)
 	if err != nil {
-		t.Error("Couldn't create a single ballot")
+		t.Fatal("Couldn't create a single ballot:", err)
 	}
 
 	// Make sure the proof originally passes verification.
 	cb := votes[0]
 	plaintext := big.NewInt(0)
 	if !cb.Vote.Answers[0].IndividualProofs[0][0].Verify(cb.Vote.Answers[0].Choices[0], plaintext, e.PublicKey) {
-		t.Error("The original proof doesn't pass verification")
+		t.Fatal("The original proof doesn't pass verification")
 	}
 
 	// Before corrupting anything, try verifying the wrong bounds for the proof.
 	if cb.Vote.Answers[0].IndividualProofs[0].Verify(0, 0, cb.Vote.Answers[0].Choices[0], e.PublicKey) {
-		t.Error("A DisjunctiveZKProof passed verification for the wrong bounds")
+		t.Fatal("A DisjunctiveZKProof passed verification for the wrong bounds")
 	}
 
 	// Try verifying the corrupted proof as a ZKProof.
 	corruptInteger(r, cb.Vote.Answers[0].Choices[0].Alpha)
 	if cb.Vote.Answers[0].IndividualProofs[0][0].Verify(cb.Vote.Answers[0].Choices[0], plaintext, e.PublicKey) {
-		t.Error("A vote with corrupted Alpha incorrectly passed verification")
+		t.Fatal("A vote with corrupted Alpha incorrectly passed verification")
 	}
 
 	// Try verifying it as a DisjunctiveZKProof, too.
 	if cb.Vote.Answers[0].IndividualProofs[0].Verify(0, 1, cb.Vote.Answers[0].Choices[0], e.PublicKey) {
-		t.Error("A DisjunctiveZKProof with corrupted Alpha incorrectly passed verification")
+		t.Fatal("A DisjunctiveZKProof with corrupted Alpha incorrectly passed verification")
 	}
 }
 
@@ -534,7 +528,7 @@ func TestCorruptedProofWrongBeta(t *testing.T) {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	e, votes, err := createSingleBallot(r)
 	if err != nil {
-		t.Error("Couldn't create a single ballot")
+		t.Fatal("Couldn't create a single ballot:", err)
 	}
 
 	cb := votes[0]
@@ -542,7 +536,7 @@ func TestCorruptedProofWrongBeta(t *testing.T) {
 	plaintext := big.NewInt(0)
 	corruptInteger(r, cb.Vote.Answers[0].Choices[0].Beta)
 	if cb.Vote.Answers[0].IndividualProofs[0][0].Verify(cb.Vote.Answers[0].Choices[0], plaintext, e.PublicKey) {
-		t.Error("A vote with corrupted Beta incorrectly passed verification")
+		t.Fatal("A vote with corrupted Beta incorrectly passed verification")
 	}
 }
 
@@ -553,7 +547,7 @@ func TestCorruptedProofWrongBounds(t *testing.T) {
 	// This must cause the hash check to fail.
 	e, votes, err := createSingleBallot(r)
 	if err != nil {
-		t.Error("Couldn't create a single ballot")
+		t.Fatal("Couldn't create a single ballot:", err)
 	}
 
 	cb := votes[0]
@@ -561,7 +555,7 @@ func TestCorruptedProofWrongBounds(t *testing.T) {
 	// Take only the first element of the proof.
 	cb.Vote.Answers[0].IndividualProofs[0] = cb.Vote.Answers[0].IndividualProofs[0][:1]
 	if cb.Vote.Answers[0].IndividualProofs[0].Verify(0, 0, cb.Vote.Answers[0].Choices[0], e.PublicKey) {
-		t.Error("A DisjunctiveZKProof with a missing proof incorrectly passed verification")
+		t.Fatal("A DisjunctiveZKProof with a missing proof incorrectly passed verification")
 	}
 }
 
@@ -571,12 +565,12 @@ func TestCorruptedBundleWrongBeta(t *testing.T) {
 	// Try full-bundle verification with a corrupted Beta.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	corruptInteger(r, b.Votes[0].Vote.Answers[0].Choices[0].Beta)
 	if b.Verify() {
-		t.Error("A bundle with an invalid vote passed verification")
+		t.Fatal("A bundle with an invalid vote passed verification")
 	}
 }
 
@@ -584,7 +578,7 @@ func TestCorruptedAuditWrongBeta(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -597,9 +591,9 @@ func TestCorruptedAuditWrongBeta(t *testing.T) {
 		answers[i] = int64(i)
 	}
 
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	res := cb.Vote.ExtractResult(b.Election)
@@ -613,11 +607,11 @@ func TestCorruptedAuditWrongBeta(t *testing.T) {
 	// Recompute the JSON for this Ballot, since it's not saved in the structure.
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("A corrupted ballot incorrectly passed audit")
+		t.Fatal("A corrupted ballot incorrectly passed audit")
 	}
 }
 
@@ -625,7 +619,7 @@ func TestCorruptedAuditWrongAnswer(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -638,9 +632,9 @@ func TestCorruptedAuditWrongAnswer(t *testing.T) {
 		answers[i] = int64(i)
 	}
 
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	// Write the wrong answer.
@@ -649,11 +643,11 @@ func TestCorruptedAuditWrongAnswer(t *testing.T) {
 	// Recompute the JSON for this Ballot, since it's not saved in the structure.
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("A corrupted ballot incorrectly passed audit")
+		t.Fatal("A corrupted ballot incorrectly passed audit")
 	}
 }
 
@@ -661,7 +655,7 @@ func TestCorruptedAuditNoRandomness(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -675,9 +669,9 @@ func TestCorruptedAuditNoRandomness(t *testing.T) {
 	}
 
 	// Try deleting the randomness.
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	// Write the wrong answer.
@@ -686,11 +680,11 @@ func TestCorruptedAuditNoRandomness(t *testing.T) {
 	// Recompute the JSON for this Ballot, since it's not saved in the structure.
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("A corrupted ballot incorrectly passed audit")
+		t.Fatal("A corrupted ballot incorrectly passed audit")
 	}
 }
 
@@ -698,7 +692,7 @@ func TestCorruptedAuditBadHash(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -712,9 +706,9 @@ func TestCorruptedAuditBadHash(t *testing.T) {
 	}
 
 	// Corrupt the election hash.
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	cb.Vote.ElectionHash = ""
@@ -722,11 +716,11 @@ func TestCorruptedAuditBadHash(t *testing.T) {
 	// Recompute the JSON for this Ballot, since it's not saved in the structure.
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("An invalid hash still passes audit")
+		t.Fatal("An invalid hash still passes audit")
 	}
 }
 
@@ -734,7 +728,7 @@ func TestCorruptedAuditOverallProof(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -748,20 +742,20 @@ func TestCorruptedAuditOverallProof(t *testing.T) {
 	}
 
 	// Corrupt the overall proof and remove the "approval" type.
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	cb.Vote.Answers[0].OverallProof = nil
 	b.Election.Questions[0].ChoiceType = "none"
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("An invalid overall proof still passes audit")
+		t.Fatal("An invalid overall proof still passes audit")
 	}
 }
 
@@ -769,7 +763,7 @@ func TestCorruptedAuditBadChoice(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -782,26 +776,26 @@ func TestCorruptedAuditBadChoice(t *testing.T) {
 		answers[i] = int64(i)
 	}
 
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	// Test with the wrong fingerprint
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if cb.Vote.Audit("wrong fingerprint", serializedVote, b.Election) {
-		t.Error("An invalid fingerprint still passes audit")
+		t.Fatal("An invalid fingerprint still passes audit")
 	}
 
 	// Corrupt the choice.
 	cb.Vote.Answers[0].Answer[0] = 200
 	serializedVote, err = MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("An invalid choice value still passes audit")
+		t.Fatal("An invalid choice value still passes audit")
 	}
 }
 
@@ -809,7 +803,7 @@ func TestCorruptedAuditWrongRandomness(t *testing.T) {
 	// Create a fake bundle to create the ballot audit.
 	b, err := createFakeBundle(1, 1, 0, 1, 2, 10, 1)
 	if err != nil {
-		t.Error("Couldn't create a fake bundle")
+		t.Fatal("Couldn't create a fake bundle:", err)
 	}
 
 	min := b.Election.Questions[0].Min
@@ -822,9 +816,9 @@ func TestCorruptedAuditWrongRandomness(t *testing.T) {
 		answers[i] = int64(i)
 	}
 
-	var cb CastBallot
-	if err = cb.Create(b.Election, [][]int64{answers}, b.Voters[0], true); err != nil {
-		t.Error("Couldn't create a ballot to audit")
+	cb, err := NewCastBallot(b.Election, [][]int64{answers}, b.Voters[0], true)
+	if err != nil {
+		t.Fatal("Couldn't create a ballot to audit:", err)
 	}
 
 	// Corrupt the choice.
@@ -832,11 +826,11 @@ func TestCorruptedAuditWrongRandomness(t *testing.T) {
 	corruptInteger(r, cb.Vote.Answers[0].Randomness[0])
 	serializedVote, err := MarshalJSON(cb.Vote)
 	if err != nil {
-		t.Error("Couldn't marshal the vote")
+		t.Fatal("Couldn't marshal the vote:", err)
 	}
 
 	if cb.Vote.Audit(cb.VoteHash, serializedVote, b.Election) {
-		t.Error("An invalid randomness value still passes audit")
+		t.Fatal("An invalid randomness value still passes audit")
 	}
 }
 
@@ -874,7 +868,11 @@ func createFakeBundle(voterCount, ballotCount, auditCount, questionCount, answer
 	}
 
 	// Tally the election.
-	results := e.Tally(votes, trustees, trusteeSecrets)
+	results, err := e.Tally(votes, trustees, trusteeSecrets)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(results) != len(tally) {
 		return nil, errors.New("couldn't tally the election")
 	}
@@ -914,43 +912,43 @@ func TestBrokenJSON(t *testing.T) {
 	// Invalid JSON data
 	b.ElectionData = []byte("{")
 	if err = b.Instantiate(); err == nil {
-		t.Error("The election bundle should not successfully deserialize an invalid Election")
+		t.Fatal("The election bundle should not successfully deserialize an invalid Election")
 	}
 
 	// Use a valid election with invalid voters.
 	b.ElectionData = []byte("{}")
 	b.VotersData = [][]byte{[]byte("{")}
 	if err = b.Instantiate(); err == nil {
-		t.Error("The election bundle should not successfully deserialize invalid Voters")
+		t.Fatal("The election bundle should not successfully deserialize invalid Voters")
 	}
 
 	// Use an empty single voter.
 	b.VotersData = [][]byte{[]byte("[{}]")}
 	b.VotesData = [][]byte{[]byte("{")}
 	if err = b.Instantiate(); err == nil {
-		t.Error("The election bundle should not successfully deserialize invalid CastBallots")
+		t.Fatal("The election bundle should not successfully deserialize invalid CastBallots")
 	}
 
 	// Use an empty single CastBallot.
 	b.VotesData = [][]byte{[]byte("{}")}
 	b.TrusteesData = []byte("{")
 	if err = b.Instantiate(); err == nil {
-		t.Error("The election bundle should not successfully deserialize invalid Trustees")
+		t.Fatal("The election bundle should not successfully deserialize invalid Trustees")
 	}
 
 	b.TrusteesData = []byte("[{}]")
 	b.ResultsData = []byte("{")
 	if err = b.Instantiate(); err == nil {
-		t.Error("The election bundle should not successfully deserialize invalid Results")
+		t.Fatal("The election bundle should not successfully deserialize invalid Results")
 	}
 }
 
-func TestElectionCreation(t *testing.T) {
+func TestNewElection(t *testing.T) {
 	var k *Key
 	if testing.Short() {
 		g, p, q, err := instantiateQuickParams()
 		if err != nil {
-			t.Error(err)
+			t.Fatal("Couldn't instantiate quick params:", err)
 		}
 
 		k = new(Key)
@@ -963,39 +961,34 @@ func TestElectionCreation(t *testing.T) {
 	answers[0] = "yes"
 	answers[1] = "no"
 	answers[2] = "maybe so"
-	q := new(Question)
-	if err := q.Create(answers, 2, 1, "Which is it?", "absolute", "Test Q"); err != nil {
-		t.Error("Couldn't create a question")
+	q, err := NewQuestion(answers, 2, 1, "Which is it?", "absolute", "Test Q")
+	if err != nil {
+		t.Fatal("Couldn't create a question:", err)
 	}
 
-	var e Election
-	secret, err := e.Create("https://example.com", "Fake Election", time.Now().String(),
+	_, secret, err := NewElection("https://example.com", "Fake Election", time.Now().String(),
 		"Fake Election", false, []*Question{q}, "Fake",
 		false, "Fake hash", time.Now().String(), time.Now().String(), k)
 	if err != nil {
-		t.Error("Couldn't create an election")
+		t.Fatal("Couldn't create an election:", err)
 	}
 
 	if secret == nil || secret.BitLen() == 0 {
-		t.Error("The election didn't produce a valid secret")
+		t.Fatal("The election didn't produce a valid secret")
 	}
 }
 
-func TestCreateVoter(t *testing.T) {
-	var v Voter
-	err := v.Create("voter 1", "voter1@example.com", true, "", "email")
-	if err != nil {
-		t.Error("Couldn't create a voter")
+func TestNewVoter(t *testing.T) {
+	if _, err := NewVoter("voter 1", "voter1@example.com", true, "", "email"); err != nil {
+		t.Fatal("Couldn't create a voter:", err)
 	}
 
-	err = v.Create("voter 2", "voter2@example.com", false, "fake hash", "email")
-	if err != nil {
-		t.Error("Couldn't create a second voter")
+	if _, err := NewVoter("voter 2", "voter2@example.com", false, "fake hash", "email"); err != nil {
+		t.Fatal("Couldn't create a second voter:", err)
 	}
 
-	err = v.Create("voter 3", "voter3@example.com", true, "fake hash", "email")
-	if err == nil {
-		t.Error("Incorrectly created a voter with a computed and a supplied hash")
+	if _, err := NewVoter("voter 3", "voter3@example.com", true, "fake hash", "email"); err == nil {
+		t.Fatal("Incorrectly created a voter with a computed and a supplied hash")
 	}
 }
 
@@ -1036,11 +1029,11 @@ func TestElectionVerification(t *testing.T) {
 
 	b, err := Download(heliosServer, electionUuid)
 	if err != nil {
-		t.Error("Couldn't download the election with uuid", electionUuid)
+		t.Fatal("Couldn't download the election with uuid", electionUuid, ":", err)
 	}
 
 	if !b.Verify() {
-		t.Error("The election with uuid", electionUuid, "didn't pass verification")
+		t.Fatal("The election with uuid", electionUuid, "didn't pass verification")
 	}
 
 	return
@@ -1053,18 +1046,18 @@ func TestElectionBundleSerialization(t *testing.T) {
 
 	b, err := Download(heliosServer, electionUuid)
 	if err != nil {
-		t.Error("Couldn't download the election with uuid", electionUuid)
+		t.Fatal("Couldn't download the election with uuid", electionUuid, ":", err)
 	}
 
 	serialized, err := json.Marshal(b)
 	if err != nil {
-		t.Error("Couldn't marshal the election bundle as JSON: ", err)
+		t.Fatal("Couldn't marshal the election bundle as JSON: ", err)
 	}
 
 	var deserialized ElectionBundle
 	err = UnmarshalJSON(serialized, &deserialized)
 	if err != nil {
-		t.Error("Couldn't unmarshal the election JSON: ", err)
+		t.Fatal("Couldn't unmarshal the election JSON: ", err)
 	}
 
 	return
@@ -1084,7 +1077,7 @@ func TestGetJSONBadAddress(t *testing.T) {
 	var e Election
 	_, err := GetJSON("garbage address", &e)
 	if err == nil {
-		t.Error("Incorrectly got JSON from an invalid address")
+		t.Fatal("Incorrectly got JSON from an invalid address")
 	}
 }
 
@@ -1097,7 +1090,7 @@ func TestGetJSONBadType(t *testing.T) {
 	elecAddr := heliosServer + "b36cbf0c-250a-11e3-89f4-46d2afa631be"
 	_, err := GetJSON(elecAddr, &i)
 	if err == nil {
-		t.Error("Incorrectly got JSON from an invalid address")
+		t.Fatal("Incorrectly got JSON from an invalid address")
 	}
 }
 
@@ -1105,7 +1098,7 @@ func TestGetJSONBadMarshal(t *testing.T) {
 	// Try to marshal a type that can't be marshaled in JSON.
 	_, err := MarshalJSON(TestGetJSONBadMarshal)
 	if err == nil {
-		t.Error("Somehow, a function was marshaled as JSON")
+		t.Fatal("Somehow, a function was marshaled as JSON")
 	}
 }
 
@@ -1120,7 +1113,7 @@ func TestBallotAudit(t *testing.T) {
 	var e Election
 	electionJSON, err := GetJSON(elecAddr, &e)
 	if err != nil {
-		t.Error("Couldn't get the election data: ", err)
+		t.Fatal("Couldn't get the election data: ", err)
 	}
 
 	// Make sure the election is set up properly, e.g., with an ElectionHash.
@@ -1129,25 +1122,25 @@ func TestBallotAudit(t *testing.T) {
 	f := "./testdata/test_audit.json"
 	file, err := os.Open(f)
 	if err != nil {
-		t.Error("Couldn't open test ballot audit file: ", err)
+		t.Fatal("Couldn't open test ballot audit file: ", err)
 	}
 
 	fi, err := file.Stat()
 	if err != nil {
-		t.Error("Couldn't get the size of the audit file: ", err)
+		t.Fatal("Couldn't get the size of the audit file: ", err)
 	}
 
 	jsonData := make([]byte, fi.Size())
 	_, err = file.Read(jsonData)
 	if err != nil {
-		t.Error("Couldn't read the whole ballot audit file: ", err)
+		t.Fatal("Couldn't read the whole ballot audit file: ", err)
 	}
 
 	var b Ballot
 	err = UnmarshalJSON(jsonData, &b)
 
 	if !b.Audit(fingerprint, jsonData, &e) {
-		t.Error("The ballot did not pass an audit")
+		t.Fatal("The ballot did not pass an audit")
 	}
 
 	return
@@ -1156,22 +1149,22 @@ func TestBallotAudit(t *testing.T) {
 func serializedVerificationHelper(file string, t *testing.T) {
 	serialized, err := ioutil.ReadFile(file)
 	if err != nil {
-		t.Error("Couldn't read the file")
+		t.Fatal("Couldn't read the file:", err)
 	}
 
 	var b ElectionBundle
 	err = UnmarshalJSON(serialized, &b)
 	if err != nil {
-		t.Error("Couldn't unmarshal the serialized JSON")
+		t.Fatal("Couldn't unmarshal the serialized JSON:", err)
 	}
 
 	t.Log("Instantiating the election data structures")
 	if err = b.Instantiate(); err != nil {
-		t.Error("Couldn't instantiate the bundle")
+		t.Fatal("Couldn't instantiate the bundle:", err)
 	}
 
 	if !b.Verify() {
-		t.Error("The election didn't pass verification")
+		t.Fatal("The election didn't pass verification")
 	}
 
 }

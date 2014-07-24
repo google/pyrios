@@ -266,14 +266,12 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 			// since everything is done in exponential ElGamal.
 			bigResult := big.NewInt(result[i][j])
 			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
-			lhs := big.NewInt(1)
 			// (decFactorCombination * bigResult) mod p
-			lhs.Mul(decFactorCombination, bigResult)
+			lhs := new(big.Int).Mul(decFactorCombination, bigResult)
 			lhs.Mod(lhs, election.PublicKey.Prime)
 
-			rhs := big.NewInt(1)
 			// tally_i_j.Beta mod p
-			rhs.Mod(tallies[i][j].Beta, election.PublicKey.Prime)
+			rhs := new(big.Int).Mod(tallies[i][j].Beta, election.PublicKey.Prime)
 
 			// These should match if the combination of the partial
 			// decryptions was correct.
@@ -511,8 +509,7 @@ func (election *Election) LabelResults(results [][]int64) LabeledResult {
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
 		q := election.Questions[i]
-		labeledRes[i].Question = q.Question
-		labeledRes[i].Answers = make([]LabeledEntry, len(q.Answers))
+		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.Answers))}
 		for j := range q.Answers {
 			labeledRes[i].Answers[j] = LabeledEntry{q.Answers[j], r[j]}
 		}
@@ -570,17 +567,15 @@ func (vote *Ballot) Audit(fingerprint string, ballotJSONData []byte, election *E
 				}
 			}
 
-			lhs := new(big.Int)
 			// g^randomness mod p == ciphertext.Alpha
-			lhs.Exp(election.PublicKey.Generator, r, election.PublicKey.Prime)
+			lhs := new(big.Int).Exp(election.PublicKey.Generator, r, election.PublicKey.Prime)
 			if lhs.Cmp(c.Alpha) != 0 {
 				glog.Errorf("The first component of choice %d in answer %d was not correctly encrypted\n", j, i)
 				return false
 			}
 
-			rhs := new(big.Int)
 			// y^randomness * plaintext mod p == ciphertext.Beta
-			rhs.Exp(election.PublicKey.PublicValue, r, election.PublicKey.Prime)
+			rhs := new(big.Int).Exp(election.PublicKey.PublicValue, r, election.PublicKey.Prime)
 			rhs.Mul(rhs, plaintext)
 			rhs.Mod(rhs, election.PublicKey.Prime)
 			if rhs.Cmp(c.Beta) != 0 {
