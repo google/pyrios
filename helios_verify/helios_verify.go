@@ -46,6 +46,7 @@ func main() {
 	var b *pyrios.ElectionBundle
 	var err error
 	if *download {
+		fmt.Println("Downloading election information and ballots. This might take a long time.")
 		b, err = pyrios.Download(*heliosServer, *electionUuid)
 		if err != nil {
 			panic(err)
@@ -63,6 +64,7 @@ func main() {
 			}
 		}
 	} else {
+		fmt.Println("Loading election information and ballots. This might take a long time.")
 		serialized, err := ioutil.ReadFile(*bundleFile)
 		if err != nil {
 			panic(err)
@@ -74,12 +76,14 @@ func main() {
 			panic(err)
 		}
 
+		fmt.Println("Deserializing election information and ballots.")
 		if err = b.Instantiate(); err != nil {
 			panic(err)
 		}
 	}
 
 	if *verify {
+		fmt.Println("Verifying election.")
 		if b.Verify() {
 			fmt.Println("The election passes verification")
 
