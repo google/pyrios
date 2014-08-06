@@ -151,7 +151,11 @@ func TestRandomElection(t *testing.T) {
 		testCount = 1
 	}
 
-	conf := &quick.Config{testCount, 0, rand.New(rand.NewSource(time.Now().UnixNano())), nil}
+	conf := &quick.Config{
+		MaxCount: testCount,
+		Rand:     rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+
 	if err := quick.Check(f, conf); err != nil {
 		t.Fatal("The election didn't pass verification: ", innerErr)
 	}
