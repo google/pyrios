@@ -17,9 +17,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/ioutil"
+	"os"
 
-	"github.com/golang/glog"
 	"github.com/google/pyrios"
 )
 
@@ -33,11 +34,13 @@ func main() {
 	flag.Parse()
 
 	if len(*electionUuid) == 0 {
-		glog.Fatal("Must provide an election uuid")
+		fmt.Fprintln(os.Stderr, "Must provide an election uuid")
+		return
 	}
 
 	if (!*download || *write) && len(*bundleFile) == 0 {
-		glog.Fatal("Must provide a bundle file name")
+		fmt.Fprintln(os.Stderr, "Must provide a bundle file name")
+		return
 	}
 
 	var b *pyrios.ElectionBundle
@@ -78,13 +81,13 @@ func main() {
 
 	if *verify {
 		if b.Verify() {
-			glog.Info("The election passes verification")
+			fmt.Println("The election passes verification")
 
-			glog.Infof("The results are as follows:\n")
+			fmt.Println("The results are as follows:")
 			lr := b.Election.LabelResults(b.Results)
-			glog.Infof("\n%s", lr)
+			fmt.Printf("%s", lr)
 		} else {
-			glog.Fatal("The election fails verification")
+			fmt.Fprintln(os.Stderr, "The election fails verification")
 		}
 	}
 }

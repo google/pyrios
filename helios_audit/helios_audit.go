@@ -16,9 +16,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/ioutil"
+	"os"
 
-	"github.com/golang/glog"
 	"github.com/google/pyrios"
 )
 
@@ -33,15 +34,18 @@ func main() {
 	flag.Parse()
 
 	if *download && len(*electionUuid) == 0 {
-		glog.Fatal("Must provide a UUID for downloading election information")
+		fmt.Fprintln(os.Stderr, "Must provide a UUID for downloading election information")
+		return
 	}
 
 	if (!*download || *write) && len(*electionFile) == 0 {
-		glog.Fatal("Must provide a election file name")
+		fmt.Fprintln(os.Stderr, "Must provide a election file name")
+		return
 	}
 
 	if len(*ballotFile) == 0 {
-		glog.Fatal("Must provide a ballot file name")
+		fmt.Fprintln(os.Stderr, "Must provide a ballot file name")
+		return
 	}
 
 	var e pyrios.Election
@@ -86,13 +90,13 @@ func main() {
 	}
 
 	if b.Audit(*fingerprint, ballotJSON, &e) {
-		glog.Info("The ballot passes verification")
+		fmt.Println("The ballot passes verification")
 
-		glog.Infof("The ballot was cast with the following values:\n")
+		fmt.Println("The ballot was cast with the following values:")
 		r := b.ExtractResult(&e)
 		lr := e.LabelResults(r)
-		glog.Infof("\n%s", lr)
+		fmt.Printf("%s", lr)
 	} else {
-		glog.Fatal("The election fails verification")
+		fmt.Fprintln(os.Stderr, "The election fails verification")
 	}
 }
