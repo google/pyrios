@@ -91,7 +91,11 @@ func main() {
 			lr := b.Election.LabelResults(b.Results)
 			fmt.Printf("%s", lr)
 		} else {
-			fmt.Fprintln(os.Stderr, "The election fails verification")
+			if b.Results == nil {
+				fmt.Fprintln(os.Stderr, "The election has not yet published results")
+			} else {
+				fmt.Fprintln(os.Stderr, "The election fails verification")
+			}
 		}
 	}
 }

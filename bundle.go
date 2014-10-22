@@ -83,8 +83,7 @@ func (b *ElectionBundle) Instantiate() error {
 	}
 
 	if err = UnmarshalJSON(b.ResultsData, &b.Results); err != nil {
-		glog.Error("Couldn't unmarshal the result of the election")
-		return err
+		glog.Info("Couldn't unmarshal the result of the election")
 	}
 
 	return nil
@@ -164,8 +163,9 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 	}
 
 	if b.ResultsData, err = GetJSON(elecAddr+"/result", &b.Results); err != nil {
-		glog.Error("Couldn't get the result of the election: ", err)
-		return nil, err
+		glog.Info("Couldn't get the result of the election: ", err)
+		// Let the result be null if we can't get it. Helios will warn
+		// about this later.
 	}
 
 	return b, nil
