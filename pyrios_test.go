@@ -939,12 +939,6 @@ func TestBrokenJSON(t *testing.T) {
 	if err = b.Instantiate(); err == nil {
 		t.Fatal("The election bundle should not successfully deserialize invalid Trustees")
 	}
-
-	b.TrusteesData = []byte("[{}]")
-	b.ResultsData = []byte("{")
-	if err = b.Instantiate(); err == nil {
-		t.Fatal("The election bundle should not successfully deserialize invalid Results")
-	}
 }
 
 func TestNewElection(t *testing.T) {
