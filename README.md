@@ -13,6 +13,8 @@ elections page](http://www.acm.org/acmelections) for details.  Elections in
 Helios use cryptography to protect ballots and enable public verifiability:
 anyone can check that the results of an election were computed correctly.
 
+Please note that this is not an official Google product.
+
 Election Verification
 ---------------------
 
